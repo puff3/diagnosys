@@ -5,7 +5,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-VENV_DIR="venv"
+VENV_DIR="$HOME/.diagnosys_venv"
 PYTHON_CMD="python3"
 
 echo "=========================================="
@@ -23,7 +23,7 @@ echo "Found Python: $PYTHON_VERSION"
 echo ""
 
 if [ ! -d "$VENV_DIR" ]; then
-    echo "Creating virtual environment..."
+    echo "Creating virtual environment at $VENV_DIR..."
     $PYTHON_CMD -m venv $VENV_DIR
     echo "✓ Virtual environment created"
     echo ""
@@ -45,6 +45,8 @@ if [ ! -f "diagnosys/__init__.py" ]; then
     exit 1
 fi
 
+export PYTHONPATH="$SCRIPT_DIR:$PYTHONPATH"
+
 echo "=========================================="
 echo "  Launching diagnosys..."
 echo "=========================================="
@@ -52,7 +54,7 @@ echo ""
 
 if [ "$1" == "--sudo" ] || [ "$1" == "-s" ]; then
     echo "Running with sudo privileges..."
-    sudo $VENV_DIR/bin/python -m diagnosys
+    sudo PYTHONPATH="$PYTHONPATH" $VENV_DIR/bin/python -m diagnosys
 else
     python -m diagnosys
 fi
