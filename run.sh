@@ -33,8 +33,6 @@ echo "Activating virtual environment..."
 source $VENV_DIR/bin/activate
 
 echo "Installing/upgrading dependencies..."
-pip install --quiet --upgrade pip
-pip install --quiet psutil rich
 
 echo "✓ Dependencies installed"
 echo ""
