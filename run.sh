@@ -39,10 +39,19 @@ pip install --quiet psutil rich
 echo "✓ Dependencies installed"
 echo ""
 
+if [ ! -d "diagnosys" ]; then
+    echo "Creating diagnosys package directory..."
+    mkdir -p diagnosys
+    touch diagnosys/__init__.py
+    echo "✓ Package directory created"
+    echo ""
+    echo "Please add your module files (diagnostics.py, recon.py, tui.py, __main__.py)"
+    echo "to the diagnosys/ directory, then run this script again."
+    exit 0
+fi
+
 if [ ! -f "diagnosys/__init__.py" ]; then
-    echo "Error: diagnosys package not found in current directory"
-    echo "Make sure you're running this from the repository root"
-    exit 1
+    touch diagnosys/__init__.py
 fi
 
 export PYTHONPATH="$SCRIPT_DIR:$PYTHONPATH"
