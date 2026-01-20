@@ -1,4 +1,3 @@
-import psutil
 import platform
 from datetime import datetime
 from rich.console import Console
@@ -7,92 +6,19 @@ from rich.panel import Panel
 from rich.prompt import Prompt
 from rich import box
 
+from diagnosys.diagnostics import SystemDiagnostics, FirmwareDiagnostics
+from diagnosys.recon import SystemRecon, ServerRecon
+
 console = Console()
-
-
-class SystemDiagnostics:
-    
-    @staticmethod
-    def get_cpu_info():
-        cpu_percent = psutil.cpu_percent(interval=1, percpu=True)
-        cpu_freq = psutil.cpu_freq()
-        return {
-            'cores_physical': psutil.cpu_count(logical=False),
-            'cores_logical': psutil.cpu_count(logical=True),
-            'usage_per_core': cpu_percent,
-            'usage_total': psutil.cpu_percent(interval=1),
-            'frequency_current': cpu_freq.current if cpu_freq else 'N/A',
-            'frequency_max': cpu_freq.max if cpu_freq else 'N/A'
-        }
-    
-    @staticmethod
-    def get_memory_info():
-        mem = psutil.virtual_memory()
-        swap = psutil.swap_memory()
-        return {
-            'total': mem.total,
-            'available': mem.available,
-            'used': mem.used,
-            'percent': mem.percent,
-            'swap_total': swap.total,
-            'swap_used': swap.used,
-            'swap_percent': swap.percent
-        }
-    
-    @staticmethod
-    def get_disk_info():
-        partitions = psutil.disk_partitions()
-        disk_info = []
-        for partition in partitions:
-            try:
-                usage = psutil.disk_usage(partition.mountpoint)
-                disk_info.append({
-                    'device': partition.device,
-                    'mountpoint': partition.mountpoint,
-                    'fstype': partition.fstype,
-                    'total': usage.total,
-                    'used': usage.used,
-                    'free': usage.free,
-                    'percent': usage.percent
-                })
-            except PermissionError:
-                continue
-        return disk_info
-    
-    @staticmethod
-    def get_network_info():
-        interfaces = psutil.net_if_addrs()
-        stats = psutil.net_if_stats()
-        net_info = []
-        for interface, addrs in interfaces.items():
-            info = {
-                'interface': interface,
-                'addresses': [],
-                'is_up': stats[interface].isup if interface in stats else False
-            }
-            for addr in addrs:
-                info['addresses'].append({
-                    'family': str(addr.family),
-                    'address': addr.address,
-                    'netmask': addr.netmask
-                })
-            net_info.append(info)
-        return net_info
-    
-    @staticmethod
-    def get_boot_time():
-        boot_timestamp = psutil.boot_time()
-        boot_time = datetime.fromtimestamp(boot_timestamp)
-        return {
-            'boot_time': boot_time,
-            'uptime': datetime.now() - boot_time
-        }
 
 
 class DiagnosysTUI:
     
     def __init__(self):
-        self.diagnostics = SystemDiagnostics()
+        self.sys_diag = SystemDiagnostics()
+        self.fw_diag = FirmwareDiagnostics()
+        self.sys_recon = SystemRecon()
+        self.srv_recon = ServerRecon()
         self.running = True
     
     def format_bytes(self, bytes_val):
@@ -112,7 +38,7 @@ class DiagnosysTUI:
         console.print(header)
     
     def show_cpu_diagnostics(self):
-        cpu = self.diagnostics.get_cpu_info()
+        cpu = self.sys_diag.get_cpu_info()
         table = Table(title="CPU Diagnostics", box=box.ROUNDED)
         table.add_column("Metric", style="cyan")
         table.add_column("Value", style="green")
@@ -125,7 +51,7 @@ class DiagnosysTUI:
         console.print(table)
     
     def show_memory_diagnostics(self):
-        mem = self.diagnostics.get_memory_info()
+        mem = self.sys_diag.get_memory_info()
         table = Table(title="Memory Diagnostics", box=box.ROUNDED)
         table.add_column("Type", style="cyan")
         table.add_column("Total", style="yellow")
@@ -151,7 +77,7 @@ class DiagnosysTUI:
         console.print(table)
     
     def show_disk_diagnostics(self):
-        disks = self.diagnostics.get_disk_info()
+        disks = self.sys_diag.get_disk_info()
         table = Table(title="Disk Diagnostics", box=box.ROUNDED)
         table.add_column("Device", style="cyan")
         table.add_column("Mount", style="yellow")
@@ -174,17 +100,161 @@ class DiagnosysTUI:
         
         console.print(table)
     
+    def show_firmware_diagnostics(self):
+        fw = self.fw_diag.get_firmware_info()
+        table = Table(title="Firmware & Hardware Info", box=box.ROUNDED)
+        table.add_column("Component", style="cyan")
+        table.add_column("Details", style="green")
+        
+        table.add_row("Platform", fw['platform'])
+        table.add_row("Machine", fw['machine'])
+        table.add_row("Processor", fw['processor'])
+        
+        console.print(table)
+        
+        if 'bios_output' in fw and fw['bios_output'] != 'Requires root privileges':
+            console.print(Panel(fw['bios_output'][:500], title="BIOS Info (truncated)", border_style="dim"))
+        elif 'hardware_output' in fw:
+            console.print(Panel(fw['hardware_output'][:500], title="Hardware Info (truncated)", border_style="dim"))
+    
+    def show_software_inventory(self):
+        packages = self.fw_diag.get_software_inventory()
+        
+        if not packages:
+            console.print("[yellow]No package managers found or accessible[/yellow]")
+            return
+        
+        table = Table(title="Software Inventory", box=box.ROUNDED)
+        table.add_column("Package Manager", style="cyan")
+        table.add_column("Package Count", style="green")
+        
+        for pkg in packages:
+            table.add_row(pkg['manager'], str(pkg['count']))
+        
+        console.print(table)
+    
+    def show_process_recon(self):
+        processes = self.sys_recon.scan_processes()
+        table = Table(title="Process Reconnaissance (Top 20 by Memory)", box=box.ROUNDED)
+        table.add_column("PID", style="cyan")
+        table.add_column("Name", style="yellow")
+        table.add_column("User", style="blue")
+        table.add_column("Memory %", style="red")
+        table.add_column("CPU %", style="green")
+        
+        for proc in processes[:15]:
+            table.add_row(
+                str(proc.get('pid', 'N/A')),
+                proc.get('name', 'N/A')[:30],
+                proc.get('username', 'N/A')[:15],
+                f"{proc.get('memory_percent', 0):.2f}%",
+                f"{proc.get('cpu_percent', 0):.2f}%"
+            )
+        
+        console.print(table)
+    
+    def show_network_recon(self):
+        connections = self.sys_recon.scan_network_connections()
+        table = Table(title="Network Reconnaissance (Active Connections)", box=box.ROUNDED)
+        table.add_column("Local Address", style="cyan")
+        table.add_column("Remote Address", style="yellow")
+        table.add_column("Status", style="green")
+        table.add_column("PID", style="magenta")
+        
+        for conn in connections[:15]:
+            table.add_row(
+                conn['local'],
+                conn['remote'],
+                conn['status'],
+                str(conn.get('pid', 'N/A'))
+            )
+        
+        console.print(table)
+    
+    def show_server_recon(self):
+        user_info = self.srv_recon.get_user_info()
+        
+        table = Table(title="Server User & Permissions Info", box=box.ROUNDED)
+        table.add_column("Property", style="cyan")
+        table.add_column("Value", style="green")
+        
+        table.add_row("Username", user_info['username'])
+        table.add_row("UID", str(user_info['uid']))
+        table.add_row("GID", str(user_info['gid']))
+        table.add_row("Home Directory", user_info['home'])
+        table.add_row("Shell", user_info['shell'])
+        table.add_row("Primary Group", user_info['primary_group'])
+        table.add_row("Is Root", "Yes" if user_info['is_root'] else "No")
+        table.add_row("Groups", ", ".join(user_info['groups'][:5]))
+        
+        console.print(table)
+        
+        listening = self.srv_recon.scan_listening_ports()
+        if listening:
+            port_table = Table(title="Listening Ports", box=box.ROUNDED)
+            port_table.add_column("Address", style="cyan")
+            port_table.add_column("Port", style="yellow")
+            port_table.add_column("PID", style="green")
+            port_table.add_column("Protocol", style="magenta")
+            
+            for port in listening[:15]:
+                port_table.add_row(
+                    port['address'],
+                    str(port['port']),
+                    str(port.get('pid', 'N/A')),
+                    port['protocol']
+                )
+            
+            console.print()
+            console.print(port_table)
+    
+    def show_network_interfaces_recon(self):
+        interfaces = self.srv_recon.scan_network_interfaces()
+        
+        for iface in interfaces:
+            table = Table(title=f"Interface: {iface['name']}", box=box.ROUNDED)
+            table.add_column("Property", style="cyan")
+            table.add_column("Value", style="green")
+            
+            table.add_row("Status", "Up" if iface['is_up'] else "Down")
+            table.add_row("Speed", f"{iface['speed']} Mbps" if iface['speed'] else "N/A")
+            table.add_row("MTU", str(iface['mtu']))
+            
+            if 'bytes_sent' in iface:
+                table.add_row("Bytes Sent", self.format_bytes(iface['bytes_sent']))
+                table.add_row("Bytes Received", self.format_bytes(iface['bytes_recv']))
+                table.add_row("Packets Sent", str(iface['packets_sent']))
+                table.add_row("Packets Received", str(iface['packets_recv']))
+            
+            for addr in iface['addresses']:
+                table.add_row(f"{addr['type']} Address", addr['address'])
+                if addr['netmask']:
+                    table.add_row(f"{addr['type']} Netmask", addr['netmask'])
+            
+            console.print(table)
+            console.print()
+    
     def main_menu(self):
         console.clear()
         self.show_header()
         
         menu = Panel(
+            "[bold yellow]DIAGNOSTICS[/bold yellow]\n"
             "[1] System Diagnostics (Full)\n"
             "[2] CPU Diagnostics\n"
             "[3] Memory Diagnostics\n"
             "[4] Disk Diagnostics\n"
+            "[5] Firmware & Hardware Info\n"
+            "[6] Software Inventory\n\n"
+            "[bold yellow]RECONNAISSANCE[/bold yellow]\n"
+            "[7] Process Reconnaissance\n"
+            "[8] Network Connections\n"
+            "[9] Directory Scan\n\n"
+            "[bold yellow]SERVER RECON[/bold yellow]\n"
+            "[10] Server User & Permissions\n"
+            "[11] Network Interfaces Detail\n\n"
             "[q] Quit",
-            title="[bold yellow]Main Menu[/bold yellow]",
+            title="[bold cyan]Main Menu[/bold cyan]",
             box=box.ROUNDED
         )
         console.print(menu)
@@ -210,12 +280,34 @@ class DiagnosysTUI:
                     self.show_memory_diagnostics()
                 elif choice == '4':
                     self.show_disk_diagnostics()
+                elif choice == '5':
+                    self.show_firmware_diagnostics()
+                elif choice == '6':
+                    self.show_software_inventory()
+                elif choice == '7':
+                    self.show_process_recon()
+                elif choice == '8':
+                    self.show_network_recon()
+                elif choice == '9':
+                    path = Prompt.ask("[cyan]Enter directory path[/cyan]", default=".")
+                    result = self.sys_recon.scan_directory(path)
+                    if result:
+                        console.print(f"\n[green]Scanned {result['count']} items, "
+                                    f"Total size: {self.format_bytes(result['total_size'])}[/green]")
+                    else:
+                        console.print("[red]Invalid path or permission denied[/red]")
+                elif choice == '10':
+                    self.show_server_recon()
+                elif choice == '11':
+                    self.show_network_interfaces_recon()
                 elif choice.lower() == 'q':
                     self.running = False
                     console.print("\n[yellow]Exiting diagnosys...[/yellow]")
                     break
+                else:
+                    console.print("[red]Invalid option[/red]")
                 
-                if choice != 'q':
+                if choice.lower() != 'q':
                     Prompt.ask("\n[dim]Press Enter to continue[/dim]")
                     
             except KeyboardInterrupt:
@@ -225,12 +317,3 @@ class DiagnosysTUI:
             except Exception as e:
                 console.print(f"\n[red]Error: {str(e)}[/red]")
                 Prompt.ask("\n[dim]Press Enter to continue[/dim]")
-
-
-def main():
-    app = DiagnosysTUI()
-    app.run()
-
-
-if __name__ == "__main__":
-    main()
